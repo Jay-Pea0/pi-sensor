@@ -1,18 +1,19 @@
 """add in description
 """
 
-from sys import sys                 # Used for command line arguments.
-from getopt import getopt           # Used for parse command line arguments.
-from time import sleep              # Used for timing sending data.
-from datetime import datetime       # Used for log files.
-from threading import Thread        # Used for multi-threading (for timing).
-from requests import requests       # Used for HTML POST requests.
-from gpiozero import MotionSensor   # Used for motion sensor.
+import sys                              # Used for command line arguments.
+import getopt                           # Used to parse command line arguments.
+import requests                         # Used for HTML POST requests.
+from time       import sleep            # Used for timing sending data.
+from datetime   import datetime         # Used for log files.
+from threading  import Thread           # Used for multi-threading (for timing).
+from gpiozero   import MotionSensor     # Used for motion sensor.
+from os         import path             # Used for file logging.
 
 
 def main(argv) -> None:
     # Defaults 
-    time_between_sending_data = 300  # 5 mins default.
+    interval = 300  # 5 mins default.
     pin = 1
     data = {
         "WEB_URL":"http://pastebin.com/api/api_post.php",
@@ -21,12 +22,16 @@ def main(argv) -> None:
     }
     # End config.  
 
-    help_statement = "sensor.py -s <motion|ir> -i <interval/ms>"
+    help_statement = str(argv[0]) + " -s <motion|ir> -p <pin #> -i <interval/s>"
     try:
-       opts, args = getopt.getopt(argv,"hs:p:i:",["sensor=","pin=","interval="])
+       opts, args = getopt.getopt(argv[1:],"hs:p:i:",["sensor=","pin=","interval="])
     except getopt.GetoptError:
        print(help_statement)
        sys.exit(2)
+
+    if len(argv) <= 1:
+        print("Not enough arguments. Exiting...")
+        sys.exit()
 
     for opt, arg in opts:
         if opt == '-h':
@@ -37,19 +42,30 @@ def main(argv) -> None:
             if sensor == "motion": continue
             elif sensor == "ir": continue
             else:
-                print("Invalid sensor. ", help_statement)
+                print("Invalid sensor. " + help_statement)
                 sys.exit()
         elif opt in ("-p", "--pin"):
             pin = arg
-            if (pin < 1):
-                print("Pin set at command line too low: ", pin)
+            try:
+                pin = int(pin)
+            except:
+                print("Pin must be a whole number.")
+                sys.exit()
+            if pin < 0:
+                print("Pin must be a positive number.")
+                sys.exit()
         elif opt in ("-i", "--interval"):
             interval = arg
+            try:
+                interval = int(interval)
+            except:
+                print("Interval must be a whole number.")
+                sys.exit()
             if interval < 1:
-                print("Interval of ", interval, "is too short.")
+                print("Interval of " + str(interval) + "is too short.")
                 sys.exit()
             if interval > 600:
-                if input("Confirm interval of ", interval, "(y): ") != 'y':
+                if input("Confirm interval of " + str(interval) + " (y): ") != 'y':
                     sys.exit() 
 
     # Make a new thread to run every Nth second to off-load the data.  
@@ -61,9 +77,9 @@ def main(argv) -> None:
         # Check sensors are started, extra guarding.
         if data["count"] == -1:
             if sensor == "motion":
-                sensor, data = start_motion_sensor(data)
+                sensor, data = start_motion_sensor(pin, data)
             elif sensor == "ir":
-                sensor, data = start_ir_sensor(data)  
+                sensor, data = start_ir_sensor(pin, data)  
             sleep(1)
             continue
         if sensor == "motion":
@@ -73,64 +89,68 @@ def main(argv) -> None:
         data["count"] += 1
 
 
-"""Attempts to start the motion sensor.
-Initialises count to 0.
-Returns sensor and data dictionary.
-"""
-def start_motion_sensor(pin: int, data: dict) -> tuple(MotionSensor, dict):
+def start_motion_sensor(pin: int, data: dict) -> tuple:#tuple(MotionSensor, dict):
+    """Attempts to start the motion sensor.
+    Initialises count to 0.
+    Returns sensor and data dictionary.
+    """
     try:
         sensor = MotionSensor(pin)  
         data["count"] = 0  # Shows motion sensor is ready.  
-        log_entry("Initialised motion sensor on pin ", pin)
-    except MotionSensor.GPIOZeroError:
-        log_entry("GPIOZero Error on initialising sensor. Pin: ", pin)
-        sys.exit(2)
+        log_entry("Initialised motion sensor on pin " + str(pin) + ".")
     except:
-        log_entry("Error initialising sensor. Pin: ", pin)
+        error_msg = "Error initialising motion sensor on pin " + str(pin) + "."
+        print(error_msg)
+        log_entry(error_msg)
         sys.exit(2)
     return sensor, data
 
 
-# Not implemented yet.
-"""Attempts to start the IR sensor.
-Initialises count to 0.
-Returns sensor and data dictionary.
-"""
-def start_ir_sensor(pin: int, data: dict) -> tuple(MotionSensor, dict):
+
+def start_ir_sensor(pin: int, data: dict) -> tuple:
+    # Not implemented yet.
+    """Attempts to start the IR sensor.
+    Initialises count to 0.
+    Returns sensor and data dictionary.
+    """
     try:
         sensor = pin  # Sensor plugged into GPIO###  
         data["count"] = 0  # Shows IR sensor is ready.  
-        log_entry("Initialised IR sensor on pin ", pin)
+        log_entry("Initialised IR sensor on pin " + str(pin))
     except:
-        log_entry("Error initialising sensor")
+        error_msg = "Error initialising IR sensor on pin " + str(pin) + "."
+        print(error_msg)
+        log_entry(error_msg)
         sys.exit(2)
     return sensor, data
 
 
-"""Send sensor data to backend. No return."""
-def send_data(WEB_URL: str, data: dict, interval: int) -> None:
+def send_data(data: dict, interval: int) -> None:
+    """Send sensor data to backend. No return."""
     if data["count"] == -1: return  # Sensor not active.
     try:
-        r = requests.post(url = WEB_URL, data = data)
+        r = requests.post(url = data["WEB_URL"], data = data)
         log_entry(r)  # Response from the backend.
         data["count"] = 0
     except:
-        log_entry("Failed logging count of ", data["count"], "Will try again in ", interval, " seconds.")
+        log_entry("Failed logging count of " + str(data["count"]) + "Will try again in " + str(interval) + " seconds.")
     sleep(interval)
     return
 
 
-"""Append a timestamp + message to the dated log file. No return"""
 def log_entry(message: str) -> None:
+    """Append a timestamp + message to the dated log file. No return"""
     if message == None: return
     if message == "": return
     now = datetime.now()
-    now_date = now.strftime("d/%m/%Y")
+    now_date = now.strftime("%d_%m_%Y")
     now_time = now.strftime("%H:%M:%S")
-    with open(now_date + " sensor log", 'a') as log:
-        log.write(now_time + " " + message)
+    filename = now_date + " Sensor Log"
+    directory = path.dirname(path.realpath(__file__))
+    with open(directory + '/' +filename, 'a') as log:
+        log.write(now_time + " " + message + "\n")
     return
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    main(sys.argv)
