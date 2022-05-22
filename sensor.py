@@ -4,14 +4,15 @@
 import sys                              # Used for command line arguments.
 import getopt                           # Used to parse command line arguments.
 import requests                         # Used for HTML POST requests.
-from time       import sleep            # Used for timing sending data.
+from os         import path             # Used for file logging.
 from datetime   import datetime         # Used for log files.
+from time       import sleep            # Used for timing sending data.
 from threading  import Thread           # Used for multi-threading (for timing).
 from gpiozero   import MotionSensor     # Used for motion sensor.
-from os         import path             # Used for file logging.
+import RPi.GPIO as GPIO                 # Used for IR distance sensor.
 
 
-def main(argv) -> None:
+def main(argv: list) -> None:
     # Defaults 
     interval = 300  # 5 mins default.
     pin = 1
@@ -38,9 +39,9 @@ def main(argv) -> None:
             print(help_statement)
             sys.exit()
         elif opt in ("-s", "--sensor"):
-            sensor = arg
-            if sensor == "motion": continue
-            elif sensor == "ir": continue
+            sensor_type = arg
+            if sensor_type == "motion": continue
+            elif sensor_type == "ir": continue
             else:
                 print("Invalid sensor. " + help_statement)
                 sys.exit()
@@ -76,20 +77,27 @@ def main(argv) -> None:
     while (True):
         # Check sensors are started, extra guarding.
         if data["count"] == -1:
-            if sensor == "motion":
+            if sensor_type == "motion":
                 sensor, data = start_motion_sensor(pin, data)
-            elif sensor == "ir":
+            elif sensor_type == "ir":
                 sensor, data = start_ir_sensor(pin, data)  
             sleep(1)
             continue
-        if sensor == "motion":
+        if sensor_type == "motion":
             sensor.wait_for_motion()
-        elif sensor == "ir":
-            pass
-        data["count"] += 1
+            data["count"] += 1
+            print("count=" + str(data['count']))
+        elif sensor_type == "ir":
+            if GPIO.input(pin):
+                data["count"] += 1
+                print("count=" + str(data['count']))
+            else:
+                sleep(0.5)
+            
+        
 
 
-def start_motion_sensor(pin: int, data: dict) -> tuple:#tuple(MotionSensor, dict):
+def start_motion_sensor(pin: int, data: dict) -> tuple:
     """Attempts to start the motion sensor.
     Initialises count to 0.
     Returns sensor and data dictionary.
@@ -97,6 +105,8 @@ def start_motion_sensor(pin: int, data: dict) -> tuple:#tuple(MotionSensor, dict
     try:
         sensor = MotionSensor(pin)  
         data["count"] = 0  # Shows motion sensor is ready.  
+        log_entry("Initialising motion sensor on pin " + str(pin) + ".")
+        sleep(60)  # Give sensor time to start.
         log_entry("Initialised motion sensor on pin " + str(pin) + ".")
     except:
         error_msg = "Error initialising motion sensor on pin " + str(pin) + "."
@@ -114,8 +124,12 @@ def start_ir_sensor(pin: int, data: dict) -> tuple:
     Returns sensor and data dictionary.
     """
     try:
-        sensor = pin  # Sensor plugged into GPIO###  
-        data["count"] = 0  # Shows IR sensor is ready.  
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        sensor = GPIO.setup(pin, GPIO.IN)  
+        data["count"] = 0  # Shows IR sensor is ready. 
+        log_entry("Initialising IR sensor on pin " + str(pin)) 
+        sleep(60)
         log_entry("Initialised IR sensor on pin " + str(pin))
     except:
         error_msg = "Error initialising IR sensor on pin " + str(pin) + "."
@@ -153,4 +167,5 @@ def log_entry(message: str) -> None:
 
 
 if __name__ == '__main__':
+    argv = ['sensor.py', '-s', 'motion', '-p', '17', '-i', '300']
     main(sys.argv)
