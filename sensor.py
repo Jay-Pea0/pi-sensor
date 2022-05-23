@@ -109,10 +109,10 @@ def parse_command_line(argv: list) -> tuple:
             try:
                 polling_interval = int(polling_interval)
             except:
-                print("Interval must be a whole number.")
+                print("Polling Interval must be a whole number.")
                 sys.exit()
-            if polling_interval < 1:
-                print("Interval of " + str(polling_interval) + "is too short.")
+            if polling_interval < 0:
+                print("Polling Interval of " + str(polling_interval) + "is too short.")
                 sys.exit()
             
         
