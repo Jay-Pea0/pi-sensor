@@ -13,25 +13,18 @@ import RPi.GPIO as GPIO                 # Used for sensors.
 
 
 def main(argv: list) -> None:
-    # Defaults - can set at command line.
-    interval = 600          # 10 mins.
-    pin = 17                
-    sensor_type = "motion"  
-
     # Mongo setup.
     client = pymongo.MongoClient("mongodb+srv://Pi:6ciXdbklDynHHH5i@vanilla.mfxfp.mongodb.net/?retryWrites=true&w=majority")
     db = client.LoneWorking
     col = db["SensorData"]
 
     # Other.
+    sensor_type, pin, polling_interval = parse_command_line(argv)
     data = {
         "timeSent" : "",
         "timeRecieved" : {}
     }
     count = -1
-
-    sensor_type, pin, interval = parse_command_line(argv, sensor_type, pin, interval)
-
 
     # Main loop. Count each signal from the motion sensor.  
     while (True):
@@ -50,30 +43,35 @@ def main(argv: list) -> None:
             data, count = save_data(data, count)
 
         # Send data every ten minutes.
-        now_minute = datetime.now().strftime("%M")
-        if now_minute[-1] == "0":
-            data, count = send_data(data, count)
+        now_minute_seconds = datetime.now().strftime("%M:%S")
+        if now_minute_seconds[1:] == "0:00":
+            data = send_data(data, col)
 
         if sensor_type == "motion":
             if GPIO.input(pin): 
                 count += 1
                 print("count=" + str(count))
-            sleep(1)
+            sleep(polling_interval)
 
         elif sensor_type == "ir":
             if GPIO.input(pin):
                 count += 1
                 print("count=" + str(count))
-            sleep(1)
+            sleep(polling_interval)
 
-def parse_command_line(argv: list, sensor_type: str, pin: int, interval: int) -> tuple:
+def parse_command_line(argv: list) -> tuple:
     """Get the command line arguments, if any.
     Returns tuple of sensor_type, pin, count.
     """
-    if len(argv) == 1: return
+    # Defaults - can set at command line.
+    polling_interval = 1  # If motion, save every 1 minute.
+    pin = 17                
+    sensor_type = "motion"
+    
+    if len(argv) == 1: return sensor_type, pin, polling_interval
 
     # Command line arguments and parsing.
-    help_statement = str(argv[0]) + " -s <motion|ir> -p <pin #> -i <interval/s>"
+    help_statement = str(argv[0]) + " -s <motion|ir> -p <pin #> -i <polling interval/s>"
 
     try:
        opts, args = getopt.getopt(argv[1:],"hs:p:i:",["sensor=","pin=","interval="])
@@ -107,14 +105,14 @@ def parse_command_line(argv: list, sensor_type: str, pin: int, interval: int) ->
                 sys.exit()
 
         elif opt in ("-i", "--interval"):
-            interval = arg
+            polling_interval = arg
             try:
-                interval = int(interval)
+                polling_interval = int(polling_interval)
             except:
                 print("Interval must be a whole number.")
                 sys.exit()
-            if interval < 1:
-                print("Interval of " + str(interval) + "is too short.")
+            if polling_interval < 1:
+                print("Interval of " + str(polling_interval) + "is too short.")
                 sys.exit()
             
         
@@ -179,15 +177,21 @@ def start_ir_sensor(data: dict, pin: int, count: int) -> tuple:
 def save_data(data: dict, count: int) -> tuple:
     """Save the time and count to the dictionary."""
     now = datetime.now().strftime("%H:%M")
+    msg = "Saving count of " + str(count) + "."
+    log_entry(msg)
+    print(msg)
     data["timeRecieved"][now] = count
     count = 0
     return data, count
 
 
-def send_data(data: dict, count: int, col: pymongo.MongoClient, interval: int) -> None:
-    """Send sensor data to backend. No return."""
-    # Sensor not active.
-    if count == -1: return  
+def send_data(data: dict, col: pymongo.MongoClient) -> dict:
+    """Send sensor data to backend. Returns data (reset if successful)."""
+    empty_dict = {
+        "timeSent" : "",
+        "timeRecieved" : {}
+    }
+    if data == empty_dict: return
 
     # Append the current time to the data dictionary before sending.
     now = datetime.now().strftime("%d/%m/%Y-%H:%M")
@@ -195,18 +199,17 @@ def send_data(data: dict, count: int, col: pymongo.MongoClient, interval: int) -
 
     # Attempt to send the data to the backend.
     try:
-        r = col.insert_one(data)
+        col.insert_one(data)
         # Response from the backend.
-        log_entry(r)  
-        # Reset variables.
-        count = 0
-        data = {
-            "timeSent" : "",
-            "timeRecieved" : {}
-        }
+        msg = "Saved to the database."
+        log_entry(msg)
+        print(msg)
+        return empty_dict
     except:
-        log_entry("Failed logging count of " + str(count) + "Will try again in " + str(interval) + " seconds.")
-    return data, count
+        msg = "Failed logging to the database. Will try again in 10 minutes."
+        log_entry(msg)
+        print(msg)
+        return data
 
 
 def log_entry(message: str) -> None:
@@ -229,5 +232,6 @@ def log_entry(message: str) -> None:
 
 
 if __name__ == '__main__':
-    # argv = ['sensor.py', '-s', 'motion', '-p', '17', '-i', '600']
     main(sys.argv)
+
+
