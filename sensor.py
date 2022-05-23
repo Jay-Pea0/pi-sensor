@@ -9,12 +9,12 @@ from os         import path             # Used for file logging.
 from datetime   import datetime         # Used for log files.
 from time       import sleep            # Used for timing sending data.
 from threading  import Thread           # Used for multi-threading (for timing).
-import RPi.GPIO as GPIO                 # Used for IR distance sensor.
+import RPi.GPIO as GPIO                 # Used for sensors.
 
 
 def main(argv: list) -> None:
     # Defaults - can set at command line.
-    interval = 600          # 5 mins.
+    interval = 600          # 10 mins.
     pin = 17                
     sensor_type = "motion"  
 
@@ -30,8 +30,48 @@ def main(argv: list) -> None:
     }
     count = -1
 
+    sensor_type, pin, interval = parse_command_line(argv, sensor_type, pin, interval)
+
+
+    # Main loop. Count each signal from the motion sensor.  
+    while (True):
+        # Check sensors are started, extra guarding.
+        if count == -1:
+            if sensor_type == "motion":
+                data, count = start_motion_sensor(data, pin, count)
+            elif sensor_type == "ir":
+                data, count = start_ir_sensor(data, pin, count)  
+            sleep(1)
+            continue
+        now_seconds = datetime.now().strftime("%S")
+        if now_seconds == "00":
+            data, count = save_data(data, count)
+
+        now_minute = datetime.now().strftime("%M")
+        if now_minute[-1] == "0":
+            data, count = send_data(data, count)
+
+        if sensor_type == "motion":
+            if GPIO.input(pin): 
+                count += 1
+                print("count=" + str(count))
+            sleep(1)
+
+        elif sensor_type == "ir":
+            if GPIO.input(pin):
+                count += 1
+                print("count=" + str(count))
+            sleep(1)
+
+def parse_command_line(argv: list, sensor_type: str, pin: int, interval: int) -> tuple:
+    """Get the command line arguments, if any.
+    Returns tuple of sensor_type, pin, count.
+    """
+    if len(argv) == 1: return
+
     # Command line arguments and parsing.
     help_statement = str(argv[0]) + " -s <motion|ir> -p <pin #> -i <interval/s>"
+
     try:
        opts, args = getopt.getopt(argv[1:],"hs:p:i:",["sensor=","pin=","interval="])
 
@@ -73,37 +113,6 @@ def main(argv: list) -> None:
             if interval < 1:
                 print("Interval of " + str(interval) + "is too short.")
                 sys.exit()
-
-    # Make a new thread to run every Nth second to off-load the data.  
-    sending_thread = Thread(target=send_data(data, count, col, interval),args={})
-    sending_thread.start()
-
-    # Make a new thread to run every minute to save data to dictionary.
-    saving_thread = Thread(target=save_data(data, count),args={})
-    saving_thread.start()
-
-    # Main loop. Count each signal from the motion sensor.  
-    while (True):
-        # Check sensors are started, extra guarding.
-        if count == -1:
-            if sensor_type == "motion":
-                data, count = start_motion_sensor(data, pin, count)
-            elif sensor_type == "ir":
-                data, count = start_ir_sensor(data, pin, count)  
-            sleep(1)
-            continue
-
-        if sensor_type == "motion":
-            if GPIO.input(pin): 
-                count += 1
-                print("count=" + str(count))
-            sleep(1)
-
-        elif sensor_type == "ir":
-            if GPIO.input(pin):
-                count += 1
-                print("count=" + str(count))
-            sleep(1)
             
         
 def start_motion_sensor(data: dict, pin: int, count: int) -> tuple:
@@ -164,24 +173,12 @@ def start_ir_sensor(data: dict, pin: int, count: int) -> tuple:
     return data, count
 
 
-def save_data(data: dict, count: int) -> None:
+def save_data(data: dict, count: int) -> tuple:
     """Save the time and count to the dictionary."""
-    while (True):
-        now = datetime.now().strftime("%H:%M")
-        now_seconds = datetime.now().strftime("%S")
-
-        # Synchronise with the minute.
-        if now_seconds != "00":
-            sleep(0.5)
-            continue
-
-        data["timeRecieved"][now] = count
-        count = 0
-        break
-
-    # Re-call this method a few seconds before the minute mark to ensure data is send on time.
-    sleep(58) 
-    return
+    now = datetime.now().strftime("%H:%M")
+    data["timeRecieved"][now] = count
+    count = 0
+    return data, count
 
 
 def send_data(data: dict, count: int, col: pymongo.MongoClient, interval: int) -> None:
@@ -198,11 +195,16 @@ def send_data(data: dict, count: int, col: pymongo.MongoClient, interval: int) -
         r = col.insert_one(data)
         # Response from the backend.
         log_entry(r)  
+        # Reset variables.
         count = 0
+        data = {
+            "timeSent" : "",
+            "timeRecieved" : {}
+        }
     except:
         log_entry("Failed logging count of " + str(count) + "Will try again in " + str(interval) + " seconds.")
     sleep(interval)
-    return
+    return data, count
 
 
 def log_entry(message: str) -> None:
