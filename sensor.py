@@ -3,25 +3,29 @@
 
 import sys                              # Used for command line arguments.
 import getopt                           # Used to parse command line arguments.
-import requests                         # Used for HTML POST requests.
+# import requests                         # Used for HTML POST requests.
+import pymongo                          # Used for HTML POST request to backend.
 from os         import path             # Used for file logging.
 from datetime   import datetime         # Used for log files.
 from time       import sleep            # Used for timing sending data.
 from threading  import Thread           # Used for multi-threading (for timing).
-from gpiozero   import MotionSensor     # Used for motion sensor.
 import RPi.GPIO as GPIO                 # Used for IR distance sensor.
 
 
 def main(argv: list) -> None:
     # Defaults 
-    interval = 300  # 5 mins default.
-    pin = 1
-    data = {
-        "WEB_URL":"http://pastebin.com/api/api_post.php",
-        "KEY":"XXXXXXXXXXXXXXXXX",
-        "count":-1
-    }
+    interval = 600  # 5 mins default.
+    pin = 17
+    sensor = "motion"
     # End config.  
+    client = pymongo.MongoClient("mongodb+srv://Pi:6ciXdbklDynHHH5i@vanilla.mfxfp.mongodb.net/?retryWrites=true&w=majority")
+    db = client.LoneWorking
+    col = db["SensorData"]
+    data = {
+        "timeSent" : "",
+        "timeRecieved" : {}
+    }
+    count = -1
 
     help_statement = str(argv[0]) + " -s <motion|ir> -p <pin #> -i <interval/s>"
     try:
@@ -70,54 +74,59 @@ def main(argv: list) -> None:
                     sys.exit() 
 
     # Make a new thread to run every Nth second to off-load the data.  
-    new_thread = Thread(target=send_data(data, interval),args={})
-    new_thread.start()
+    sending_thread = Thread(target=send_data(col, data, interval),args={})
+    sending_thread.start()
+    # Make a new thread to run every minute to save data to dictionary.
+    saving_thread = Thread(target=save_data(data, count),args={})
+    saving_thread.start()
 
     # Main loop. Count each signal from the motion sensor.  
     while (True):
         # Check sensors are started, extra guarding.
-        if data["count"] == -1:
+        if count == -1:
             if sensor_type == "motion":
-                sensor, data = start_motion_sensor(pin, data)
+                data, count = start_motion_sensor(data, pin, count)
             elif sensor_type == "ir":
-                sensor, data = start_ir_sensor(pin, data)  
+                data, count = start_ir_sensor(data, pin, count)  
             sleep(1)
             continue
         if sensor_type == "motion":
-            sensor.wait_for_motion()
-            data["count"] += 1
-            print("count=" + str(data['count']))
+            if GPIO.input(pin): 
+                count += 1
+                print("count=" + str(count))
+            else:
+                sleep(1)
         elif sensor_type == "ir":
             if GPIO.input(pin):
-                data["count"] += 1
-                print("count=" + str(data['count']))
+                count += 1
+                print("count=" + str(count))
             else:
-                sleep(0.5)
+                sleep(1)
             
         
 
-
-def start_motion_sensor(pin: int, data: dict) -> tuple:
+def start_motion_sensor(data: dict, pin: int, count: int) -> tuple:
     """Attempts to start the motion sensor.
     Initialises count to 0.
     Returns sensor and data dictionary.
     """
     try:
-        sensor = MotionSensor(pin)  
-        data["count"] = 0  # Shows motion sensor is ready.  
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(pin, GPIO.IN)
+        count = 0  # Shows motion sensor is ready.  
         log_entry("Initialising motion sensor on pin " + str(pin) + ".")
-        sleep(60)  # Give sensor time to start.
+        sleep(10)  # Give sensor time to start.
         log_entry("Initialised motion sensor on pin " + str(pin) + ".")
     except:
         error_msg = "Error initialising motion sensor on pin " + str(pin) + "."
         print(error_msg)
         log_entry(error_msg)
         sys.exit(2)
-    return sensor, data
+    return data, count
 
 
 
-def start_ir_sensor(pin: int, data: dict) -> tuple:
+def start_ir_sensor(data: dict, pin: int, count: int) -> tuple:
     # Not implemented yet.
     """Attempts to start the IR sensor.
     Initialises count to 0.
@@ -125,29 +134,46 @@ def start_ir_sensor(pin: int, data: dict) -> tuple:
     """
     try:
         GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-        sensor = GPIO.setup(pin, GPIO.IN)  
-        data["count"] = 0  # Shows IR sensor is ready. 
+        GPIO.setup(pin, GPIO.IN)  
+        count = 0  # Shows IR sensor is ready. 
         log_entry("Initialising IR sensor on pin " + str(pin)) 
-        sleep(60)
+        sleep(10)
         log_entry("Initialised IR sensor on pin " + str(pin))
     except:
         error_msg = "Error initialising IR sensor on pin " + str(pin) + "."
         print(error_msg)
         log_entry(error_msg)
         sys.exit(2)
-    return sensor, data
+    return data, count
 
 
-def send_data(data: dict, interval: int) -> None:
+def save_data(data: dict, count: int) -> None:
+    while (True):
+        now = datetime.now().strftime("%H:%M")
+        now_seconds = datetime.now().strftime("%S")
+        if now_seconds != "00":
+            sleep(0.5)
+            continue
+        data["timeRecieved"][now] = count
+        count = 0
+        break
+    sleep(55)
+    return
+
+
+
+
+def send_data(col: pymongo.MongoClient, data: dict, interval: int) -> None:
     """Send sensor data to backend. No return."""
-    if data["count"] == -1: return  # Sensor not active.
+    if count == -1: return  # Sensor not active.
+    now = datetime.now().strftime("%d/%m/%Y-%H:%M")
+    data["timeSent"] = now
     try:
-        r = requests.post(url = data["WEB_URL"], data = data)
+        r = col.insert_one(data)
         log_entry(r)  # Response from the backend.
-        data["count"] = 0
+        count = 0
     except:
-        log_entry("Failed logging count of " + str(data["count"]) + "Will try again in " + str(interval) + " seconds.")
+        log_entry("Failed logging count of " + str(count) + "Will try again in " + str(interval) + " seconds.")
     sleep(interval)
     return
 
@@ -167,5 +193,5 @@ def log_entry(message: str) -> None:
 
 
 if __name__ == '__main__':
-    argv = ['sensor.py', '-s', 'motion', '-p', '17', '-i', '300']
+    argv = ['sensor.py', '-s', 'motion', '-p', '17', '-i', '600']
     main(sys.argv)
