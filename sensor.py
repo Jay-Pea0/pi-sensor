@@ -43,10 +43,13 @@ def main(argv: list) -> None:
                 data, count = start_ir_sensor(data, pin, count)  
             sleep(1)
             continue
+
+        # Save data every minute.
         now_seconds = datetime.now().strftime("%S")
         if now_seconds == "00":
             data, count = save_data(data, count)
 
+        # Send data every ten minutes.
         now_minute = datetime.now().strftime("%M")
         if now_minute[-1] == "0":
             data, count = send_data(data, count)
@@ -203,7 +206,6 @@ def send_data(data: dict, count: int, col: pymongo.MongoClient, interval: int) -
         }
     except:
         log_entry("Failed logging count of " + str(count) + "Will try again in " + str(interval) + " seconds.")
-    sleep(interval)
     return data, count
 
 
