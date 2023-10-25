@@ -6,58 +6,13 @@ import sys                              # Used for command line arguments.
 import getopt                           # Used to parse command line arguments.
 import pymongo                          # Used for HTML POST request to backend.
 from os         import path             # Used for file logging.
+from os         import getenv           # Used for hiding API key.
 from datetime   import datetime         # Used for log files.
 from time       import sleep            # Used for timing sending data.
 from threading  import Thread           # Used for multi-threading (for timing).
 import RPi.GPIO as GPIO                 # Used for sensors.
+from dotenv import load_dotenv          # Hide API key.
 
-
-def main(argv: list) -> None:
-    # Mongo setup.
-    client = pymongo.MongoClient("mongodb+srv://Pi:6ciXdbklDynHHH5i@vanilla.mfxfp.mongodb.net/?retryWrites=true&w=majority")
-    db = client.LoneWorking
-    col = db["SensorData"]
-
-    # Other.
-    sensor_type, pin, polling_interval = parse_command_line(argv)
-    data = {
-        "timeSent" : "",
-        "timeRecieved" : {}
-    }
-    count = -1
-
-    # Main loop. Count each signal from the motion sensor.  
-    while (True):
-        # Check sensors are started, extra guarding.
-        if count == -1:
-            if sensor_type == "motion":
-                data, count = start_motion_sensor(data, pin, count)
-            elif sensor_type == "ir":
-                data, count = start_ir_sensor(data, pin, count)  
-            sleep(1)
-            continue
-
-        # Save data every minute.
-        now_seconds = datetime.now().strftime("%S")
-        if now_seconds == "00":
-            data, count = save_data(data, count)
-
-        # Send data every ten minutes.
-        now_minute_seconds = datetime.now().strftime("%M:%S")
-        if now_minute_seconds[1:] == "0:00":
-            data = send_data(data, col)
-
-        if sensor_type == "motion":
-            if GPIO.input(pin): 
-                count += 1
-                print("count=" + str(count))
-            sleep(polling_interval)
-
-        elif sensor_type == "ir":
-            if GPIO.input(pin):
-                count += 1
-                print("count=" + str(count))
-            sleep(polling_interval)
 
 def parse_command_line(argv: list) -> tuple:
     """Get the command line arguments, if any.
@@ -229,6 +184,56 @@ def log_entry(message: str) -> None:
         log.write(now_time + " " + message + "\n")
 
     return
+
+
+def main(argv: list) -> None:
+    load_dotenv()
+    API_KEY = getenv('API_KEY')
+    # Mongo setup.
+    client = pymongo.MongoClient(API_KEY)
+    db = client.LoneWorking
+    col = db["SensorData"]
+
+    # Other.
+    sensor_type, pin, polling_interval = parse_command_line(argv)
+    data = {
+        "timeSent" : "",
+        "timeRecieved" : {}
+    }
+    count = -1
+
+    # Main loop. Count each signal from the motion sensor.  
+    while (True):
+        # Check sensors are started, extra guarding.
+        if count == -1:
+            if sensor_type == "motion":
+                data, count = start_motion_sensor(data, pin, count)
+            elif sensor_type == "ir":
+                data, count = start_ir_sensor(data, pin, count)  
+            sleep(1)
+            continue
+
+        # Save data every minute.
+        now_seconds = datetime.now().strftime("%S")
+        if now_seconds == "00":
+            data, count = save_data(data, count)
+
+        # Send data every ten minutes.
+        now_minute_seconds = datetime.now().strftime("%M:%S")
+        if now_minute_seconds[1:] == "0:00":
+            data = send_data(data, col)
+
+        if sensor_type == "motion":
+            if GPIO.input(pin): 
+                count += 1
+                print("count=" + str(count))
+            sleep(polling_interval)
+
+        elif sensor_type == "ir":
+            if GPIO.input(pin):
+                count += 1
+                print("count=" + str(count))
+            sleep(polling_interval)
 
 
 if __name__ == '__main__':
