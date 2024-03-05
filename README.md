@@ -1,5 +1,10 @@
-# pi-sensor
-CMP2804M Team Software Engineering - Assessment 3 - Sensor Data from Raspberry Pi
+# Pi Sensor
+
+CMP2804M Team Software Engineering (Assessment 3), Achieved 70%
+
+Originally created 2022
+
+Sensor Data from Raspberry Pi
 
 Stores a count of how many times a sensor is activated and sends it to a backend every ten minutes.
 The status and count is printed to the console and major events are logged to a log file.
