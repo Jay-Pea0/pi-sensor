@@ -4,7 +4,7 @@ CMP2804M Team Software Engineering (Assessment 3), Achieved 70%
 
 Originally created 2022
 
-Includes code and video of project in action
+[Link to video of project in action](https://drive.google.com/file/d/12aUlOesJt957O4LB2ee4Xjnm0TifQPit/view?usp=sharing)
 
 Sensor Data from Raspberry Pi
 
