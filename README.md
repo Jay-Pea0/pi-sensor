@@ -4,6 +4,8 @@ CMP2804M Team Software Engineering (Assessment 3), Achieved 70%
 
 Originally created 2022
 
+Includes code and video of project in action
+
 Sensor Data from Raspberry Pi
 
 Stores a count of how many times a sensor is activated and sends it to a backend every ten minutes.
